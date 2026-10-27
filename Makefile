@@ -53,7 +53,7 @@ FIGSOURCES := $(wildcard */*.fig) $(wildcard */*/*.fig)
 
 EPSSOURCES_FROM_FIG := $(FIGSOURCES:%.fig=%.eps)
 
-SVGSOURCES_ALL := $(wildcard */*.svg)
+SVGSOURCES_ALL := $(filter-out perfbook-epub-images/%,$(wildcard */*.svg))
 SVG_EMERGENCY := $(wildcard */*.svg*.svg)
 SVG_GENERATED := CodeSamples/formal/data/RCU-test-ratio.svg
 SVGSOURCES := $(filter-out $(SVG_EMERGENCY) $(SVG_GENERATED),$(SVGSOURCES_ALL)) $(SVG_GENERATED)
@@ -252,8 +252,9 @@ BASE_DEPENDS := perfbook.tex $(foreach v,tcb 1c msns mss mstx msr msn msnt sf nq
 .PHONY: qq perfbook-qq.pdf qqmsg
 .PHONY: help help-official help-full help-semiofficial help-paper help-draft
 .PHONY: help-experimental help-prefixed
+.PHONY: epub epub-clean html html-clean
 .PHONY: paper-clean periodcheck punctcheck punctcheck-auto
-.PHONY: cleanfigs cleanfigs-eps cleanfigs-svg figs precheck
+.PHONY: cleanfigs cleanfigs-eps cleanfigs-svg cleanfigs-epub figs precheck
 
 all: punctcheck-auto
 
@@ -652,9 +653,63 @@ help-experimental:
 	@echo "  - \"sf\" requires \"newtxsf\"."
 	@echo "  - All the targets except for \"msn\" use \"Latin Modern Typewriter\" font"
 	@echo "    for code snippets."
+	@echo
+	@echo "Reflowable EPUB (experimental, lwarp + pandoc; see FAQ-BUILD.txt #15):"
+	@echo "  perfbook.epub,     epub: chapter-split EPUB3 from the ebook-size variant"
+	@echo "  perfbook-epub_html.html, html: lwarp HTML only, no EPUB packaging"
+
+PDFTOCAIRO := $(shell $(WHICH) pdftocairo 2>/dev/null)
+EPUB_SVGS := $(addprefix epub-figs/,$(EPSSOURCES:%.eps=%.svg))
+EPUB_SVG_CROP := epub-figs/CodeSamples/formal/data/RCU-test-ratio-crop.svg
+EPUB_SVG_CLEAN := intro/PPGrelation.svg defer/RCUListDeleteClassic.svg \
+	memorder/RCU2G2R.svg formal/cbmc.svg formal/nidhugg.svg
+EPUB_SVG_STAGED := $(addprefix epub-figs/,$(EPUB_SVG_CLEAN))
+
+$(EPUB_SVG_STAGED): epub-figs/%.svg: %.svg
+	@echo "$< --> $@ (sanitize flowRoot)"
+	@mkdir -p $(dir $@)
+	@perl -0777 -pe 's{<flowRoot\b.*?</flowRoot>}{}gs' $< > $@
+
+$(EPUB_SVGS): epub-figs/%.svg: %.pdf
+	@echo "$< --> $@ (pdftocairo)"
+ifndef PDFTOCAIRO
+	$(error pdftocairo (poppler-utils) not found. Please install it)
+endif
+	@mkdir -p $(dir $@)
+	@pdftocairo -svg $< $@
+
+$(EPUB_SVG_CROP): CodeSamples/formal/data/RCU-test-ratio.svg
+	@echo "$< --> $@ (copy, uncropped)"
+	@mkdir -p $(dir $@)
+	@cp $< $@
+
+epub: perfbook.epub
+html: perfbook-epub_html.html
+
+perfbook-epub.tex: perfbook-eb.tex
+	echo '\input{reflow.ltx}\input{perfbook-eb}' > $@
+
+perfbook.epub perfbook-epub_html.html: perfbook-epub.tex $(LATEXGENERATED) $(BIBSOURCES) \
+    $(EPUB_SVGS) $(EPUB_SVG_CROP) $(EPUB_SVG_STAGED) reflow.ltx utilities/runlwarp.sh \
+    utilities/epub-fixhtml.pl utilities/epub-footnotes.pl utilities/epub-links.pl
+perfbook.epub:
+	LATEX=$(LATEX) sh utilities/runlwarp.sh perfbook-epub
+perfbook-epub_html.html:
+	LATEX=$(LATEX) sh utilities/runlwarp.sh perfbook-epub html
+
+cleanfigs-epub:
+	rm -rf epub-figs
+
+html-clean: epub-clean
+epub-clean:
+	rm -rf epub-tmp perfbook-epub-images perfbook-epub-images.txt \
+		lwarpmk.conf perfbook-epub.lwarpmkconf perfbook-epub*.html \
+		perfbook-epub.tex perfbook-epub_html.* epub-tmp-*.log comment_*.cut \
+		lwarp*.css sample_project.css lwarp.ist lwarp.xdy *.xdy core core.*
 
 help-full: help-official help-paper help-semiofficial help-draft help-prefixed help-experimental
 
+clean: epub-clean
 clean:
 	find . -name '*.aux' -o -name '*.blg' \
 		-o -name '*.dvi' -o -name '*.log' \
@@ -677,6 +732,7 @@ paper-clean:
 distclean: clean
 	sh utilities/cleanpdf.sh
 	rm -f $(EPSSOURCES_FROM_DOT) $(EPSSOURCES_FROM_TEX) $(EPSSOURCES_FROM_FIG)
+	rm -rf epub-figs
 	find . -name '*.fcv' -o -name '*.ltms' | xargs rm -f
 
 touchsvg:
@@ -687,6 +743,7 @@ ls-unused:
 
 neatfreak: distclean
 	find . -name '*.pdf' | xargs rm -f
+	rm -f perfbook.epub
 
 cleanfigs-eps:
 	rm -f $(EPSSOURCES_FROM_TEX) $(EPSSOURCES_FROM_DOT) $(EPSSOURCES_FROM_FIG)
@@ -695,7 +752,7 @@ cleanfigs-eps:
 cleanfigs-svg:
 	rm -f $(PDFTARGETS_OF_SVG) $(SVG_EMERGENCY) $(SVG_GENERATED) $(PDFTARGETS_OF_SVG_CROP)
 
-cleanfigs: cleanfigs-eps cleanfigs-svg
+cleanfigs: cleanfigs-eps cleanfigs-svg cleanfigs-epub
 
 figs: $(PDFTARGETS_OF_EPS) $(PDFTARGETS_OF_SVG) $(PDFTARGETS_OF_SVG_CROP)
 
