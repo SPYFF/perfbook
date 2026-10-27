@@ -1,0 +1,151 @@
+% reflow.ltx -- HTML-mode shims for the lwarp reflowable (EPUB) build.
+% Input before \documentclass by perfbook-epub.tex; print builds never
+% load this file.
+
+\makeatletter
+\@ifpackageloaded{lwarp}{}{%
+  \AddToHook{package/fontenc/after}{%
+    \usepackage{fontaxes}%
+    \usepackage[HTMLFilename=perfbook-epub-]{lwarp}%
+    \ifbool{warpingHTML}{}{%
+      \LWR@writeconf{lwarpmk.conf}\LWR@writeconf{\jobname.lwarpmkconf}\stop}%
+    \setcounter{FileDepth}{0}%
+    \boolfalse{FileSectionNames}%
+    \booltrue{FormatEPUB}%
+    \HTMLAuthor{Paul E. McKenney}%
+    \HTMLLanguage{en-US}%
+    \RenewDocumentCommand{\usepackage}{o m o}{%
+      \IfValueT{#1}{\PassOptionsToPackage{#1}{#2}\PassOptionsToPackage{#1}{lwarp-#2}}%
+      \IfValueTF{#3}{\RequirePackage{#2}[#3]}{\RequirePackage{#2}}}%
+    \providecommand{\SetWatermarkVerCenter}[1]{}%
+    \providecommand{\bottomtitlespace}{0pt}%
+    \let\LWR@saved@l@section\l@section
+    \let\LWR@saved@l@subsection\l@subsection}%
+  \AddToHook{package/lwarp-subfig/after}{\let\@newsubfloat\LWR@orig@newsubfloat}%
+  \AddToHook{package/lwarp-enumitem/after}{%
+    \let\enit@style@unboxed\enit@style@standard
+    \let\enit@style@sameline\enit@style@standard
+    \let\enit@style@multiline\enit@style@standard
+    \let\enit@style@nextline\enit@style@standard}%
+  \AddToHook{package/booktabs/after}{\setboolean{usecleveref}{true}}%
+  \AddToHook{package/lwarp-fancyhdr/before}{\let\headrule\relax\let\footrule\relax}%
+  \AddToHook{file/glsdict.tex/after}{\input{reflow.ltx}}%
+  \makeatother\endinput}
+
+% Restore lwarp's TOC entries (overwritten by perfbook-lt.tex's \@dottedtocline)
+% and suppress hyphenation tables in HTML mode.
+\let\l@section\LWR@saved@l@section
+\let\l@subsection\LWR@saved@l@subsection
+\renewcommand{\hyphenation}[1]{}
+
+% Drop \hbox wrappers around inline code so lwarp's inline listing span survives,
+% and allow unescaped $ inside \lstinline (\co/\nbco/\qco).
+\AddToHook{file/ushyphex.tex/before}{%
+  \renewcommand{\nbco}[1]{\lstinline[breaklines=false,breakatwhitespace=false]{#1}}%
+  \renewcommand{\qtco}[1]{``\tco{#1}''}}
+
+\AtBeginDocument{%
+  \renewcommand{\printindex}[1][]{}%
+  \def\lst@InlineG{\lst@Init\relax\let\lst@arg\@empty\lst@InlineGJ}%
+  \RenewDocumentCommand{\LWR@HTML@resizebox}{s m m}{}%
+  \renewenvironment{sidewaystable*}[1][]{\begin{table*}[#1]}{\end{table*}}%
+  \let\pfb@lstcap\lst@MakeCaption
+  \renewcommand*\lst@MakeCaption[1]{%
+    \lst@ifdisplaystyle\pfb@lstcap{#1}\else\caption@ORI@lst@MakeCaption{#1}\fi}%
+  \renewcommand{\epigraph}[2]{%
+    \LWR@HTML@epigraph{\biolinum\emph{#1}}{\biolinum\scshape\footnotesize #2}}%
+  \NoIndentAfterCmd{\epigraph}%
+  \let\pfb@label\label@noarg
+  \def\label@noarg#1{\LWR@clean@arg{#1}\pfb@label{\LWR@on@arg}}}
+
+% Bibliography: avoid math in alphapf.bst labels, link citations to entries,
+% and format thebibliography as a <dl> description list.
+\AtBeginEnvironment{thebibliography}{%
+  \@ifundefined{etalchar}{}{\renewcommand{\etalchar}[1]{\textsuperscript{#1}}}%
+  \LWR@descriptionstart
+  \renewcommand{\@biblabel}[1]{[#1]}}
+\patchcmd{\@lbibitem}{\ignorespaces}{\hypertarget{cite.#2}{}\ignorespaces}{}{}
+\def\@cite@ofmt#1{%
+  \ifnumcomp{\value{LWR@linkdepth}}{>}{0}{#1}{%
+    \edef\pfb@citelink{\noexpand\hyperlink{cite.\@citeb}}\pfb@citelink{#1}}}
+
+% Unlink images and \path{} so they do not point to files outside the EPUB.
+\expandafter\patchcmd\csname LWR@includegraphicsb code\endcsname
+  {\LWR@href@partsanitized{\LWR@parsedfilename}}{\@firstofone}{}{}
+\LetLtxMacro\LWR@HTML@path\nolinkurl
+\LWR@formatted{path}
+
+% Head appendices "Appendix" instead of "Chapter".
+\renewcommand*{\LWR@printchaptername}{\@chapapp~}
+
+% Unwrap table scaling/framing macros so tabular & tokens are read in place.
+\renewcommand{\tcresizewidth}{}
+\renewcommand{\ebresizewidth}{}
+\renewcommand{\ebresizewidthsw}{}
+\renewcommand{\ebresizeverb}[1]{}
+\RenewDocumentCommand{\LWR@HTML@framebox}{d() o o}{}
+
+% Support \multirow nested inside \multicolumn and empty multirow-spanned cells.
+\NewCommandCopy\LWR@orig@htmlmulticolumn\LWR@htmlmulticolumn
+\def\LWR@mc@row#1#2#3\multirow\@nil{\LWR@HTML@multicolumnrow{\LWR@mc@n}{\LWR@mc@a}{#1}{#2}{#3}}
+\def\LWR@chkmrow#1\multirow#2\@nil{%
+  \ifblank{#2}{\LWR@orig@htmlmulticolumn{\LWR@mc@n}{\LWR@mc@a}{#1}}{\LWR@mc@row#2\@nil}}
+\RenewDocumentCommand{\LWR@htmlmulticolumn}{m m +m}{%
+  \def\LWR@mc@n{#1}\def\LWR@mc@a{#2}\LWR@chkmrow#3\multirow\@nil}
+\StartDefiningTabulars
+\patchcmd{\LWR@tabledatacolumntag}{\ifdefequal{\LWR@mynexttoken}{\end}}{%
+  \ifboolexpr{bool{LWR@usedmultirow} and bool{LWR@doingcmidrule} and test {\ifdefequal{\LWR@mynexttoken}{&}}}%
+    {\global\let\LWR@mynextaction\mrowcell}{}%
+  \ifdefequal{\LWR@mynexttoken}{\end}}{}{}
+\StopDefiningTabulars
+
+% Keep fvextra line numbers on their own lines and hang boxed verbatim from top.
+\renewcommand*{\LWR@FV@linethensep}{\hbox to 1em{\hss\theFancyVerbLine}\kern\FV@NumberSep}
+\define@key{FV}{baseline}{}
+\let\FV@baseline\@ne
+
+% Alias inline enumerate* to block enumerate, and no-op \phantomsection.
+\RenewDocumentEnvironment{enumerate*}{o}{%
+  \IfNoValueTF{#1}{\begin{enumerate}}{\begin{enumerate}[#1]}}{\end{enumerate}}
+\renewcommand{\phantomsection}{}
+
+% Page-dropping variants of perfbook's cross-reference, quiz, and credit macros,
+% plus ASCII normalization of \" in label keys and removal of " on \cpageref{}".
+\renewcommand{\pararef}[1]{paragraph ``\nameref{#1}''}
+\renewcommand{\Pararef}[1]{Paragraph ``\nameref{#1}''}
+\renewcommand{\QuickQHeadingPage}[3]{\QuickQHeading{#1}{#2}{#3}}
+\patchcmd{\QuickQuizAnswer}{\rule{7pt}{7pt}}{\textbf{[Answer]}}{}{}
+\patchcmd{\QuickA}{\rule{7pt}{7pt}}{\textbf{[Question]}}{}{}
+\renewcommand{\OrigPubItem}[4]{\item \Cref{#1} (``#2'') originally appeared in #3~\cite{#4}.}
+\renewcommand{\RangeOrigPub}[5]{\item \Cref{#1}--\ref{#2} (``#3'') originally appeared in #4~\cite{#5}.}
+\renewcommand{\ContribItem}[2]{\item \Cref{#1} by #2.}
+
+\def\LWR@clean@arg#1{{\def\"##1{##1}\xdef\LWR@on@arg{#1}}}
+\let\LWR@orig@cref\cref
+\let\LWR@orig@Cref\Cref
+\renewcommand{\cref}[1]{\LWR@clean@arg{#1}\LWR@orig@cref{\LWR@on@arg}\futurelet\LWR@tok\LWR@on@a}
+\renewcommand{\Cref}[1]{\LWR@clean@arg{#1}\LWR@orig@Cref{\LWR@on@arg}\futurelet\LWR@tok\LWR@on@a}
+\def\LWR@on@a{\ifx\LWR@tok\@sptoken\expandafter\LWR@on@b\fi}
+\expandafter\def\expandafter\LWR@on@b\space{\futurelet\LWR@tok\LWR@on@c}
+\def\LWR@on@c{\ifx\LWR@tok o\expandafter\LWR@on@d\else\space\fi}
+\def\LWR@on@d o#1{\ifx n#1\expandafter\LWR@on@e\else\space o#1\fi}
+\def\LWR@on@e{\futurelet\LWR@tok\LWR@on@f}
+\def\LWR@on@f{\ifx\LWR@tok\@sptoken\expandafter\LWR@on@g\else\space on\fi}
+\expandafter\def\expandafter\LWR@on@g\space{\futurelet\LWR@tok\LWR@on@h}
+\def\LWR@on@h{\ifx\LWR@tok\cpageref\expandafter\LWR@on@i\else\space on \fi}
+\def\LWR@on@i\cpageref#1{\edef\LWR@tmp{#1}\ifx\LWR@tmp\LWR@on@arg\else\space on \cpageref{#1}\fi}
+\renewcommand{\cpageref}[1]{\cref{#1}}
+
+\crefname{quickquizctr}{Quick Quiz}{Quick Quizzes}
+\crefname{quickquizctrC}{Quick Quiz}{Quick Quizzes}
+\crefname{quickquizctrP}{Quick Quiz}{Quick Quizzes}
+\crefname{paragraph}{paragraph}{paragraphs}
+\Crefname{paragraph}{Paragraph}{Paragraphs}
+\appto\appendix{%
+  \crefalias{chapter}{appendix}%
+  \crefalias{section}{subappendix}%
+  \crefalias{subsection}{subsubappendix}%
+  \crefalias{subsubsection}{subsubsubappendix}}
+\makeatother
+
+\graphicspath{{epub-figs/}{./}}
