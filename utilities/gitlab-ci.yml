@@ -31,3 +31,19 @@ generate_pdfs:
           - perfbook.pdf
           - perfbook-1c.pdf
           - perfbook-eb.pdf
+
+generate_epub:
+    stage: build
+    allow_failure: true
+
+    before_script:
+        - pacman --noconfirm -Syu texlive-meta fig2dev ghostscript graphviz librsvg gnuplot wget make which fontconfig git ttf-dejavu gnu-free-fonts ttf-liberation pandoc poppler texlive-langjapanese unzip zip epubcheck
+        - mkdir -p ~/.local/share/fonts && cp fonts/steel-city-comic.regular.ttf ~/.local/share/fonts/ && fc-cache
+
+    script:
+        - source /etc/profile
+        - make epub
+
+    artifacts:
+      paths:
+          - perfbook.epub

@@ -370,3 +370,28 @@
 		Code samples under CodeSamples/ were originally written for
 		Linux and a QNX compat layer was added in 2022.  Compat layers
 		for other OSes are more than welcome!
+
+15.	How can I build a reflowable EPUB for my e-reader?
+
+	A.	Typing "make epub" will build "perfbook.epub", a chapter-split
+		EPUB3 derived from the ebook-size variant via lwarp and pandoc.
+		Typing "make html" stops after the lwarp HTML output (no pandoc
+		needed), leaving perfbook-epub_html.html, perfbook-epub-*.html,
+		and perfbook-epub-images/ ready to open in a browser.
+
+		In addition to #5 above, prerequisites are pandoc, poppler-utils
+		(pdftocairo, pdftotext, pdfseparate), unzip, zip, lwarp/lwarpmk
+		(>= 0.921, in texlive-latex-extra on Debian/Ubuntu, texlive-meta
+		on Arch, texlive-collection-latexextra on Fedora), and ifptex.sty
+		(texlive-lang-japanese on Debian/Ubuntu, texlive-langjapanese on
+		Arch).  docker/Dockerfile includes all of these.
+
+		Intermediates go to epub-tmp/, epub-figs/, perfbook-epub-images/,
+		and perfbook-epub_html.*.  "make epub-clean" (or "make html-clean",
+		also run by "make clean") removes them; "make neatfreak" also
+		removes "perfbook.epub".
+
+		Known limitations: page-number indexes are omitted (the acronym
+		list is kept), math is rendered as SVG images, and SVG cartoons
+		fall back to the reader's font.  pdftocairo may dump git-ignored
+		core files on exit while still writing valid SVGs.
