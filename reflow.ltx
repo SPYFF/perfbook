@@ -47,7 +47,11 @@
 \AtBeginDocument{%
   \renewcommand{\printindex}[1][]{}%
   \def\lst@InlineG{\lst@Init\relax\let\lst@arg\@empty\lst@InlineGJ}%
-  \RenewDocumentCommand{\LWR@HTML@resizebox}{s m m}{}%
+  \RenewDocumentCommand{\LWR@HTML@resizebox}{s m m}{\pfb@setigpct{#2}}%
+  \renewcommand{\epsfbox}[1]{\resizebox{\epsfxsize}{!}{\includegraphics{#1}}}%
+  \define@key{igraph}{width}{\ifdefempty{\pfb@igwidthstyle}{\pfb@setigpct{#1}}{}}%
+  \define@key{igraph}{height}{}%
+  \define@key{igraph}{scale}{\ifdefempty{\pfb@igwidthstyle}{\pfb@setigpct{#1\twocolumnwidth}}{}}%
   \renewenvironment{sidewaystable*}[1][]{\begin{table*}[#1]}{\end{table*}}%
   \let\pfb@lstcap\lst@MakeCaption
   \renewcommand*\lst@MakeCaption[1]{%
@@ -69,7 +73,26 @@
   \ifnumcomp{\value{LWR@linkdepth}}{>}{0}{#1}{%
     \edef\pfb@citelink{\noexpand\hyperlink{cite.\@citeb}}\pfb@citelink{#1}}}
 
-% Unlink images and \path{} so they do not point to files outside the EPUB.
+% Scale figures proportionally to their LaTeX \resizebox/\includegraphics target
+% width (relative to \onecolumntextwidth = 4.1in, clamped to [35%, 85%]), and
+% unlink images and \path{} so they do not point to files outside the EPUB.
+\def\pfb@igwidthstyle{}
+\def\pfb@setigpct#1{%
+  \begingroup
+    \setlength{\dimen@}{#1}%
+    \count@=\numexpr\dimen@*100/\onecolumntextwidth\relax
+    \ifnum\count@>85 \count@=85 \fi
+    \ifnum\count@<35 \count@=35 \fi
+    \xdef\pfb@igwidthstyle{width:\the\count@\@percentchar}%
+  \endgroup}
+\AtBeginEnvironment{tabular}{%
+  \gdef\pfb@igwidthstyle{}%
+  \ifdef{\lockfml}{\renewcommand{\lockfml}[1]{\begin{picture}(6,8)(0,0)\rotatebox{90}{#1}\end{picture}}}{}}
+\AtBeginEnvironment{lateximage}{\boolfalse{LWR@in@multirow@par}}
+\pretocmd{\LWR@ig@htmltag}{%
+  \ifdefempty{\pfb@igwidthstyle}%
+    {\def\LWR@igwidthstyle{width:75\@percentchar}}%
+    {\let\LWR@igwidthstyle\pfb@igwidthstyle\gdef\pfb@igwidthstyle{}}}{}{}
 \expandafter\patchcmd\csname LWR@includegraphicsb code\endcsname
   {\LWR@href@partsanitized{\LWR@parsedfilename}}{\@firstofone}{}{}
 \LetLtxMacro\LWR@HTML@path\nolinkurl
@@ -99,10 +122,21 @@
   \ifdefequal{\LWR@mynexttoken}{\end}}{}{}
 \StopDefiningTabulars
 
-% Keep fvextra line numbers on their own lines and hang boxed verbatim from top.
+% Keep fvextra/verbbox line numbers on their own lines, wrap verbbox in <pre>,
+% hang boxed verbatim from top, and prevent \midrule from eating "(1)".
 \renewcommand*{\LWR@FV@linethensep}{\hbox to 1em{\hss\theFancyVerbLine}\kern\FV@NumberSep}
 \define@key{FV}{baseline}{}
 \let\FV@baseline\@ne
+\AtBeginDocument{%
+  \renewcommand{\LstLineNo}{\leavevmode\hbox to 1em{\hss\arabic{VerbboxLineNo}}\kern\FV@NumberSep}%
+  \patchcmd{\verbbox}{\let\my@par\par}{\let\my@par\endgraf}{}{}%
+  \patchcmd{\verbbox}{\verbatim\verbbox@inner}{\LWR@atbeginverbatim{verbatim}\verbatim\verbbox@inner}{}{}%
+  \patchcmd{\endverbbox}{\egroup}{\LWR@afterendverbatim\egroup}{}{}%
+  \pretocmd{\theverbbox}{\LWR@forcenewpage}{}{}%
+  \DeclareDocumentCommand{\LWR@HTML@midrule}{o}{%
+    \IfValueTF{#1}{\LWR@docmidrule[#1](){1-\arabic{LWR@tabletotalLaTeXcols}}}%
+                  {\defaddtocounter{LWR@hlines}{1}}%
+    \LWR@getmynexttoken}}
 
 % Alias inline enumerate* to block enumerate, and no-op \phantomsection.
 \RenewDocumentEnvironment{enumerate*}{o}{%

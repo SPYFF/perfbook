@@ -125,6 +125,7 @@ package=$tmp/package
 rm -rf "$package"
 unzip -q $base.epub -d "$package" || exit 2
 perl -pi -e 's/LWRANCHOR:([^\s<\\\\]+)/<span id="$1"><\/span>/g' "$package"/EPUB/text/*.xhtml || exit 2
+perl utilities/epub-fixhtml.pl --post "$package" || exit 2
 check "listing preservation" "`grep -rho '<pre' $tmp/*.html | wc -l`" "`grep -rho '<pre' "$package"/EPUB/text/*.xhtml | wc -l`"
 check "line-anchor preservation" "`grep -rho 'LWRANCHOR:ln:' $tmp/*.html | wc -l`" "`grep -rho 'id="ln:' "$package"/EPUB/text/*.xhtml | wc -l`"
 
@@ -145,11 +146,42 @@ figure.epigraph { margin: 1.5em 0 1.5em auto; max-width: 27em; font-size: .85em;
 figure.epigraph p { margin: 0; padding: .25ex 0; text-indent: 0; }
 figure.epigraph figcaption { text-align: right; border-top: 1px solid #A0A0A0; font-variant: small-caps; font-size: .92em; margin-top: .5ex; }
 
-/* Listings and tables: no scroll boxes.  WebKit-based readers (Foliate)
-   paint only the first page of an overflow:auto box that is split across
-   pages, leaving blank space for the rest, so wrap long tokens instead. */
-pre, table { overflow: visible; }
-pre code, th, td { overflow-wrap: anywhere; }
+/* Figures: center all images and captions, cap width at 85%, and keep
+   captions attached to their images across page breaks. */
+figure.figure { text-align: center; margin: 1.2em auto; page-break-inside: avoid; break-inside: avoid; }
+figure.figure p { margin: 0 0 .4em 0; text-indent: 0; text-align: center; }
+figure.figure img.inlineimage { display: inline-block; margin: 0 auto; max-width: 85%; height: auto; }
+
+/* Listings and tables: use smaller relative font sizes to minimize line
+   wraps while scaling with the reader's user-configured font size, and
+   avoid scroll boxes (WebKit-based readers like Foliate paint only the
+   first page of an overflow:auto box split across pages). */
+figure.listing, figure.table { margin: 1em 0; }
+figure.figure figcaption, figure.figure span.figurecaption,
+figure.listing figcaption, figure.listing span.figurecaption,
+figure.table figcaption, figure.table span.figurecaption {
+  display: block; text-align: center; font-size: .9em; margin: .35em 0;
+  page-break-before: avoid; break-before: avoid;
+}
+figure.listing.ruled { border-top: 1px solid #A0A0A0; border-bottom: 1px solid #A0A0A0; padding: .35em 0; }
+figure.listing pre { margin: .35em 0; }
+figure.listing table td { font-family: Menlo, Monaco, 'Lucida Console', Consolas, monospace; }
+pre, table { overflow: visible; line-height: 1.25; }
+pre { font-size: .75em; }
+pre code { font-size: 100%; overflow-wrap: anywhere; }
+kbd { font-family: Menlo, Monaco, 'Lucida Console', Consolas, monospace; font-size: 85%; }
+table { display: table; width: 100%; font-size: .8em; }
+th, td { overflow-wrap: break-word; padding: .2em .35em; text-align: left; }
+td.tdc, td.tdcenter { text-align: center; }
+td.tdr, td.tdright { text-align: right; }
+tr.hline td, tr.tbrule td { border-top: 1px solid #808080; }
+tbody tr.tbrule:first-child td { border-top: none; }
+td.tdrule, td.tdrulel, td.tdruler, td.tdrulelr { border-top: 1px solid #A0A0A0; }
+td.tvertbarl { border-left: 1px solid #808080; }
+td.tvertbarr { border-right: 1px solid #808080; }
+td.tvertbarldouble { border-left: 3px double #808080; }
+td.tvertbarrdouble { border-right: 3px double #808080; }
+th p, td p { margin: 0; text-align: inherit; line-height: inherit; }
 
 /* KOReader: never typeset Quick Quiz answers as in-page footnotes (they
    would spoil the answer below the question); tap-to-popup still works
