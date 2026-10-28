@@ -1,0 +1,218 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# EPUB reader harness: drive KOReader (crengine) and Foliate's foliate-js
+# reader (WebKitGTK) against an EPUB in throwaway profiles.  Both run
+# windowless by default and are controlled and screenshotted through their
+# own loopback APIs, so nothing depends on the desktop's window system.
+# Run "harness help" for usage.
+
+set -u
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=${HARNESS_ROOT:-/tmp/epub-harness}
+KOREADER=${KOREADER:-$HOME/.local/bin/koreader}
+KO_PORT=${KO_PORT:-8099}
+FJ_PORT=${FJ_PORT:-8766}
+FOL_APP=com.github.johnfactotum.Foliate
+
+die() { echo "harness: $*" >&2; exit 1; }
+need() { for t; do command -v "$t" > /dev/null 2>&1 || die "missing tool: $t"; done; }
+urlenc() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"; }
+abspath() { case $1 in /*) echo "$1" ;; *) echo "$(pwd)/$1" ;; esac; }
+wait_for() { # $1 = tenths of a second, rest = command
+	n=$1; shift
+	while [ "$n" -gt 0 ]; do "$@" > /dev/null 2>&1 && return 0; sleep 0.1; n=$((n - 1)); done
+	return 1
+}
+interactive_flag() { test "${1:-}" = --interactive; }
+port_free() { python3 -c 'import socket, sys; s = socket.socket(); sys.exit(s.connect_ex(("127.0.0.1", int(sys.argv[1]))) == 0)' "$1"; }
+
+# ---------------------------------------------------------------- KOReader
+ko_home=$ROOT/ko
+ko_url=http://127.0.0.1:$KO_PORT/koreader
+
+ko_alive() { curl -sf -m 2 "$ko_url/" > /dev/null 2>&1; }
+
+ko_start() { # [--interactive] <book.epub> [key=value ...]
+	need curl python3
+	test -x "$KOREADER" || die "KOReader AppImage not found at $KOREADER (set KOREADER=)"
+	interactive=
+	if interactive_flag "${1:-}"; then interactive=1; shift; fi
+	test $# -ge 1 || die "usage: harness ko-start [--interactive] <book.epub> [key=value ...]"
+	book=$(abspath "$1"); shift
+	test -r "$book" || die "cannot read $book"
+	ko_alive && die "a KOReader harness already listens on $KO_PORT (harness ko-stop)"
+	port_free $KO_PORT || die "port $KO_PORT is in use (set KO_PORT=)"
+	rm -rf "$ko_home"; mkdir -p "$ko_home/patches" "$ko_home/books"
+	# KOReader writes <book>.sdr/ beside the book: use a copy in the profile.
+	cp "$book" "$ko_home/books/book.epub"
+	cp "$HERE/ko-patch.lua" "$ko_home/patches/2-harness.lua"
+	python3 "$HERE/ko-settings.py" "$ko_home/settings.reader.lua" \
+		"httpinspector={port=$KO_PORT,autostart=true}" "$@" || exit 1
+	(
+		export KO_HOME="$ko_home" EMULATE_READER_W="${W:-700}" EMULATE_READER_H="${H:-1000}"
+		# Background: SDL offscreen driver, no window.  Interactive: SDL's
+		# default driver (Wayland or X11), a normal window for a human.
+		test -n "$interactive" || export SDL_VIDEO_DRIVER=offscreen SDL_VIDEODRIVER=offscreen
+		setsid "$KOREADER" "$ko_home/books/book.epub" > "$ko_home/ko.log" 2>&1 &
+		echo $! > "$ko_home/pid"
+	)
+	wait_for 300 ko_alive || { tail -20 "$ko_home/ko.log"; die "KOReader did not start"; }
+	sleep 1.5	# first page render after the inspector comes up
+	echo "KOReader up: profile $ko_home, inspector $ko_url/"
+}
+ko_stop() {
+	ko_alive && curl -s -m 5 "$ko_url/event/Exit/" > /dev/null
+	if ! wait_for 100 sh -c "! curl -sf -m 1 '$ko_url/'"; then
+		test -r "$ko_home/pid" && kill -TERM -- "-$(cat "$ko_home/pid")" 2> /dev/null
+	fi
+	rm -f "$ko_home/pid"
+	echo "KOReader stopped (profile kept in $ko_home)"
+}
+ko_call() { # <lua global> [args...]: every argument arrives as a Lua string
+	f=$1; shift; path=
+	for a; do path="$path/'$(urlenc "$a")'"; done
+	curl -s -m 60 "$ko_url/globals/$f$path/"; echo
+}
+ko_ev() { # <Event> [args...]: UIManager event; numeric args stay numbers
+	path=$1; shift
+	for a; do path="$path/$(urlenc "$a")"; done
+	curl -s -m 10 "$ko_url/event/$path/"; echo
+}
+ko_shot() { # <out.png>: KOReader's own framebuffer
+	curl -sf -m 15 "$ko_url/device/screen/bb" -o "$1" || die "screenshot failed (is KOReader up?)"
+	echo "$1"
+}
+
+# --------------------------------------------------------------- foliate-js
+fj_home=$ROOT/fj
+fj_url=http://127.0.0.1:$FJ_PORT
+
+fj_alive() { curl -sf -m 2 "$fj_url/status" > /dev/null 2>&1; }
+fj_ready() { curl -sf -m 5 "$fj_url/status" 2> /dev/null | grep -q '"ready": true'; }
+fj_ready_or_dead() { fj_ready || ! kill -0 "$1" 2> /dev/null; }
+
+fj_extract() { # Foliate's own reader + foliate-js, from the installed flatpak
+	d=$(flatpak info --show-location $FOL_APP 2> /dev/null) || die "Foliate flatpak ($FOL_APP) not installed"
+	res=$d/files/share/$FOL_APP/$FOL_APP.gresource
+	for p in $(gresource list "$res" | grep -E "/(foliate-js|reader)/" | grep -v pdfjs); do
+		rel=${p#/com/github/johnfactotum/Foliate/}
+		mkdir -p "$fj_home/web/$(dirname "$rel")"
+		gresource extract "$res" "$p" > "$fj_home/web/$rel"
+	done
+	cp "$HERE/fj-harness.js" "$fj_home/web/reader/harness.js"
+	sed 's|<script src="reader.js" type="module"></script>|<script src="harness.js"></script>\n&|' \
+		"$fj_home/web/reader/reader.html" > "$fj_home/web/reader/harness.html"
+	grep -q 'src="harness.js"' "$fj_home/web/reader/harness.html" || die "reader.html layout changed"
+}
+
+fj_start() { # [--headless] <book.epub> [query]
+	need flatpak gresource curl python3
+	headless=
+	if test "${1:-}" = --headless; then headless=1; shift; fi
+	test $# -ge 1 || die "usage: harness fj-start [--headless] <book.epub> [query]"
+	book=$(abspath "$1"); query=${2:-}
+	test -r "$book" || die "cannot read $book"
+	fj_alive && die "a foliate-js harness already listens on $FJ_PORT (harness fj-stop)"
+	for p in $FJ_PORT $((FJ_PORT + 1)); do port_free $p || die "port $p is in use (set FJ_PORT=)"; done
+	rm -rf "$fj_home"; mkdir -p "$fj_home/web"
+	fj_extract
+	# Same GNOME runtime (so the same WebKitGTK) as the Foliate flatpak.
+	runtime=${RUNTIME:-$(flatpak info --show-runtime $FOL_APP | sed 's|/[^/]*/|//|')}
+	cp "$book" "$fj_home/web/book.epub"
+	if test -n "$headless"; then
+		# Private Broadway display, browser viewer on FJ_PORT+1 (loopback).
+		# Software rendering: misses GPU-compositing paint bugs, and the
+		# screen is 1024x768 whatever W/H say.
+		set -- --command="$HERE/fj-broadway.sh" "$runtime" $((FJ_PORT - 8000)) $((FJ_PORT + 1)) "$HERE/fj-session.py"
+	else
+		# XWayland window with the GPU, like Foliate itself.  It may sit behind
+		# other windows: screenshots come from WebKit, not the screen.
+		set -- --socket=x11 --nosocket=wayland --env=GDK_BACKEND=x11 --command=python3 "$runtime" "$HERE/fj-session.py"
+	fi
+	setsid flatpak run --device=dri --share=network --filesystem="$HERE" --filesystem="$fj_home" \
+		--env=WW="${W:-1400}" --env=WH="${H:-900}" --env=FONTSIZE="${FONTSIZE:-16}" \
+		--env=MONO_FONTSIZE="${MONO_FONTSIZE:-${FONTSIZE:-16}}" \
+		--instance-id-fd=3 "$@" "$fj_home/web" "$FJ_PORT" /book.epub "$query" \
+		3> "$fj_home/instance" > "$fj_home/session.log" 2>&1 &
+	pid=$!
+	wait_for 600 fj_ready_or_dead $pid || { tail -20 "$fj_home/session.log"; die "foliate-js did not get ready"; }
+	fj_ready || { tail -20 "$fj_home/session.log"; die "foliate-js session exited"; }
+	echo "foliate-js up ($runtime): profile $fj_home, control $fj_url/${headless:+, viewer http://127.0.0.1:$((FJ_PORT + 1))/}"
+}
+fj_stop() {
+	fj_alive && curl -s -m 5 -X POST "$fj_url/quit" > /dev/null
+	if ! wait_for 100 sh -c "! curl -sf -m 1 '$fj_url/status'"; then
+		test -s "$fj_home/instance" && flatpak kill "$(cat "$fj_home/instance")" 2> /dev/null
+	fi
+	echo "foliate-js stopped (profile kept in $fj_home)"
+}
+fj_eval() { # '<async JS function body>' (use return); prints the result
+	curl -s -m 300 -X POST --data-binary "$1" "$fj_url/eval" | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+if "error" in r: sys.exit("harness: " + r["error"])
+v = r.get("value")
+print(v if isinstance(v, str) else json.dumps(v, indent=1))'
+}
+fj_shot() { # <out.png>: WebKit snapshot of the visible view
+	out=$(abspath "$1")
+	curl -sf -m 60 "$fj_url/shot?out=$(urlenc "$fj_home/shot.png")" > /dev/null || die "snapshot failed"
+	mv -f "$fj_home/shot.png" "$out" && echo "$out"
+}
+
+# ------------------------------------------------------------------- misc
+montage_cmd() { # <out.png> <in.png>...: side by side, scaled
+	need convert
+	out=$1; shift
+	convert "$@" +append -resize "${SCALE:-50%}" "$out" && echo "$out"
+}
+cleanup() {
+	ko_alive && ko_stop
+	fj_alive && fj_stop
+	rm -rf "$ROOT"
+	echo "removed $ROOT"
+}
+
+usage() {
+	cat << EOF
+harness - EPUB reader harness (throwaway profiles under \$HARNESS_ROOT=$ROOT)
+
+KOReader (AppImage \$KOREADER, HTTP inspector on 127.0.0.1:\$KO_PORT=$KO_PORT)
+  ko-start [--interactive] BOOK [key=value ...]
+                         fresh profile; key=value are settings.reader.lua entries
+                         as Lua literals, dotted keys edit one table field
+  ko-ev EVENT [ARGS...]  UIManager event: GotoPage 96, GotoViewRel 1, Close
+  ko-call FUNC [ARGS...] call a Lua global, e.g. the harness_* helpers
+  ko-shot OUT.png        framebuffer screenshot
+  ko-stop
+foliate-js = Foliate's reader in its own WebKitGTK (control on 127.0.0.1:\$FJ_PORT=$FJ_PORT)
+  fj-start [--headless] BOOK [QUERY]
+                         XWayland window + GPU (faithful); --headless = Broadway,
+                         software paint.  QUERY: cols=1&at=EPUB/text/ch005.xhtml&css=...
+  fj-eval 'JS'           async function body, e.g. 'return harness.state()'
+  fj-shot OUT.png        snapshot of the visible view
+  fj-stop
+Misc
+  montage OUT.png IN.png...   side-by-side comparison (SCALE=50%)
+  cleanup                     stop both and delete \$HARNESS_ROOT
+Env: W H (screen/window px), FONTSIZE MONO_FONTSIZE (foliate-js), RUNTIME
+EOF
+}
+
+cmd=${1:-help}; test $# -gt 0 && shift
+case $cmd in
+	ko-start) ko_start "$@" ;;
+	ko-stop) ko_stop ;;
+	ko-ev) ko_ev "$@" ;;
+	ko-call) ko_call "$@" ;;
+	ko-shot) ko_shot "$@" ;;
+	fj-start) fj_start "$@" ;;
+	fj-stop) fj_stop ;;
+	fj-eval) fj_eval "$@" ;;
+	fj-shot) fj_shot "$@" ;;
+	montage) montage_cmd "$@" ;;
+	cleanup) cleanup ;;
+	help|-h|--help) usage ;;
+	*) usage; exit 2 ;;
+esac
