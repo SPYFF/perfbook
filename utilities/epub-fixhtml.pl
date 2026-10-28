@@ -14,7 +14,7 @@ use File::Spec;
 if (@ARGV == 2 && $ARGV[0] eq '--post') {
     my $pkg = $ARGV[1];
     my @xhtmls = glob("$pkg/EPUB/text/*.xhtml");
-    my (%rot90, %fig_svg, %aspect);
+    my (%rot90, %fig_svg, %eq_svg, %eq_em, %aspect);
 
     for my $xf (@xhtmls) {
         open(my $fh, '<', $xf) or die "$0: cannot read $xf: $!\n";
@@ -38,6 +38,9 @@ if (@ARGV == 2 && $ARGV[0] eq '--post') {
         while ($x =~ m{<img\b[^>]*\bsrc="\.\./media/([^"]+\.svg)"[^>]*\bclass="inlineimage"}g) {
             $fig_svg{$1} = 1;
         }
+        while ($x =~ m{<img\s+src="\.\./media/(file\d+\.svg)"\s+class="lateximage"\s+style=""\s+alt="(\([0-9A-Z][^)]*\))\s*\\(?:begin|\{begin\})\{(?:equation|align)\}}gs) {
+            $eq_svg{$1} = 1;
+        }
 
         open(my $oh, '>', $xf) or die "$0: cannot write $xf: $!\n";
         print $oh $x;
@@ -51,6 +54,41 @@ if (@ARGV == 2 && $ARGV[0] eq '--post') {
         my $svg = <$fh>;
         close($fh);
         my $orig = $svg;
+
+        # Crop display-equation SVGs to their math expression (removing lwarp's
+        # baked-in 6in-minipage equation tag) and compute their em width.
+        if ($eq_svg{$name}) {
+            my ($w, $h) = $svg =~ /\bwidth="([0-9.]+)pt"\s+height="([0-9.]+)pt"/;
+            if (defined $w && defined $h) {
+                my %gmax;
+                while ($svg =~ m{<g\s+id="(glyph-[^"]+)">(.*?)</g>}gs) {
+                    my ($gid, $body) = ($1, $2);
+                    my $mx = 0;
+                    while ($body =~ m{([0-9.]+)\s+-?[0-9.]+}g) { $mx = $1 if $1 > $mx; }
+                    $gmax{$gid} = $mx;
+                }
+                my $max_edge = 0;
+                while ($svg =~ m{<use\s+xlink:href="#([^"]+)"\s+x="(-?[0-9.]+)"}g) {
+                    next if $2 > 190;
+                    my $e = $2 + ($gmax{$1} // 6);
+                    $max_edge = $e if $e > $max_edge;
+                }
+                while ($svg =~ m{<path\b[^>]*\bd="M\s*-?[0-9.]+\s+-?[0-9.]+\s+L\s*([0-9.]+)\s+-?[0-9.]+\s*"[^>]*\btransform="matrix\(1,\s*0,\s*0,\s*-1,\s*(-?[0-9.]+),}g) {
+                    my $e = $2 + $1;
+                    $max_edge = $e if $e > $max_edge;
+                }
+                my $w_sym = 2 * ($w - 216.362);
+                my $w_math = sprintf("%.2f", ($w_sym > $max_edge + 0.8 ? $w_sym : $max_edge + 0.8));
+                my $vw = sprintf("%.2f", $w_math + 0.5);
+                $svg =~ s{<use\b[^>]*\bx="([0-9.]+)"[^>]*/>\s*}{$1 > 190 ? '' : $&}ge;
+                if ($h > 40) {
+                    $svg =~ s/\bwidth="[0-9.]+pt"\s+height="[0-9.]+pt"\s+viewBox="[^"]*"/width="${vw}pt" height="55.6pt" viewBox="-0.5 -3.3 $vw 55.6"/;
+                } else {
+                    $svg =~ s/\bwidth="[0-9.]+pt"\s+height="[0-9.]+pt"\s+viewBox="[^"]*"/width="${vw}pt" height="${h}pt" viewBox="-0.5 0 $vw $h"/;
+                }
+                $eq_em{$name} = sprintf("%.3f", $vw / 8.5);
+            }
+        }
 
         # Rotate SVGs that were wrapped in \rotatebox{90} so all readers render them upright.
         if ($rot90{$name}) {
@@ -105,6 +143,22 @@ if (@ARGV == 2 && $ARGV[0] eq '--post') {
                 $pct = $cap if $pct > $cap;
             }
             "${pre}width:${pct}%;$post"
+        }gse;
+
+        # Format numbered display equations as centered math with right-aligned equation numbers.
+        $x =~ s{(?:<p><span id="(autoid-\d+)"></span></p>\s*)?<p><span id="(lateximage-perfbook-epub-\d+)" class="lateximagesource"><img src="\.\./media/(file\d+\.svg)" class="lateximage" style="" alt="(\([0-9A-Z][^)]*\))\s*(\\(?:begin|\{begin\})\{(?:equation|align)\}.*?)" /></span></p>}{
+            my ($aid, $lid, $svg, $num, $alt) = ($1, $2, $3, $4, $5);
+            my $em = $eq_em{$svg} // '8.000';
+            my $aspan = defined($aid) ? qq(<span id="$aid"></span>) : '';
+            my $nstyle = '';
+            if ($num =~ /^\(([0-9A-Z]+\.)(\d+)(?:\xe2\x80\x93|-)(\1)(\d+)\)$/) {
+                my ($pfx, $s, $e) = ($1, $2, $4);
+                $num = join('<br />', map { "($pfx$_)" } ($s .. $e));
+                $nstyle = ' style="line-height:2.18"';
+            }
+            qq(<table class="displaymath"><tbody><tr><td class="eqpad">$aspan</td>) .
+            qq(<td class="eqbody"><span id="$lid" class="lateximagesource"><img src="../media/$svg" class="lateximage" style="width:${em}em" alt="$alt" /></span></td>) .
+            qq(<td class="eqnum"$nstyle>$num</td></tr></tbody></table>)
         }gse;
 
         if ($x ne $orig) {

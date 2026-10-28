@@ -128,6 +128,7 @@ perl -pi -e 's/LWRANCHOR:([^\s<\\\\]+)/<span id="$1"><\/span>/g' "$package"/EPUB
 perl utilities/epub-fixhtml.pl --post "$package" || exit 2
 check "listing preservation" "`grep -rho '<pre' $tmp/*.html | wc -l`" "`grep -rho '<pre' "$package"/EPUB/text/*.xhtml | wc -l`"
 check "line-anchor preservation" "`grep -rho 'LWRANCHOR:ln:' $tmp/*.html | wc -l`" "`grep -rho 'id="ln:' "$package"/EPUB/text/*.xhtml | wc -l`"
+check_positive "display equation formatting" "`grep -rho 'class=\"displaymathnumbered\"' $tmp/*.html | wc -l`" "`grep -rho '<table class=\"displaymath\">' "$package"/EPUB/text/*.xhtml | wc -l`"
 
 perl utilities/epub-footnotes.pl "$package"/EPUB/text/*.xhtml || exit 2
 expected_fn=`perl -0777 -ne '$n += () = /<p[^>]*>\s*<sup>\d+<\/sup>/g; END { print $n+0 }' $tmp/*.html`
@@ -182,6 +183,15 @@ td.tvertbarr { border-right: 1px solid #808080; }
 td.tvertbarldouble { border-left: 3px double #808080; }
 td.tvertbarrdouble { border-right: 3px double #808080; }
 th p, td p { margin: 0; text-align: inherit; line-height: inherit; }
+
+/* Numbered display equations: center math expression and flush equation
+   number to the right margin while scaling math with the body font. */
+table.displaymath { width: 100%; margin: .8em 0; border: none; border-collapse: collapse; font-size: 1em; page-break-inside: avoid; break-inside: avoid; }
+table.displaymath tbody, table.displaymath tr, table.displaymath td { border: none; padding: 0; vertical-align: middle; }
+table.displaymath td.eqpad { width: 12%; }
+table.displaymath td.eqbody { width: 76%; text-align: center; }
+table.displaymath td.eqbody img.lateximage { max-width: 100%; height: auto; vertical-align: middle; }
+table.displaymath td.eqnum { width: 12%; text-align: right; white-space: nowrap; }
 
 /* KOReader: never typeset Quick Quiz answers as in-page footnotes (they
    would spoil the answer below the question); tap-to-popup still works
