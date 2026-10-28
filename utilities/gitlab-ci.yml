@@ -42,8 +42,9 @@ generate_epub:
 
     script:
         - source /etc/profile
-        - make epub
+        - make epub epub-endnotes
 
     artifacts:
       paths:
           - perfbook.epub
+          - perfbook-endnotes.epub

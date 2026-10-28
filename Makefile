@@ -252,7 +252,7 @@ BASE_DEPENDS := perfbook.tex $(foreach v,tcb 1c msns mss mstx msr msn msnt sf nq
 .PHONY: qq perfbook-qq.pdf qqmsg
 .PHONY: help help-official help-full help-semiofficial help-paper help-draft
 .PHONY: help-experimental help-prefixed
-.PHONY: epub epub-clean html html-clean
+.PHONY: epub epub-endnotes epub-clean html html-clean
 .PHONY: paper-clean periodcheck punctcheck punctcheck-auto
 .PHONY: cleanfigs cleanfigs-eps cleanfigs-svg cleanfigs-epub figs precheck
 
@@ -656,6 +656,8 @@ help-experimental:
 	@echo
 	@echo "Reflowable EPUB (experimental, lwarp + pandoc; see FAQ-BUILD.txt #15):"
 	@echo "  perfbook.epub,     epub: chapter-split EPUB3 from the ebook-size variant"
+	@echo "  perfbook-endnotes.epub, epub-endnotes: same, with plain linked endnotes and"
+	@echo "                    inline Quick Quiz answers instead of popup footnotes"
 	@echo "  perfbook-epub_html.html, html: lwarp HTML only, no EPUB packaging"
 
 PDFTOCAIRO := $(shell $(WHICH) pdftocairo 2>/dev/null)
@@ -684,6 +686,7 @@ $(EPUB_SVG_CROP): CodeSamples/formal/data/RCU-test-ratio.svg
 	@cp $< $@
 
 epub: perfbook.epub
+epub-endnotes: perfbook-endnotes.epub
 html: perfbook-epub_html.html
 
 perfbook-epub.tex: perfbook-eb.tex
@@ -696,6 +699,8 @@ perfbook.epub:
 	LATEX=$(LATEX) sh utilities/runlwarp.sh perfbook-epub
 perfbook-epub_html.html:
 	LATEX=$(LATEX) sh utilities/runlwarp.sh perfbook-epub html
+perfbook-endnotes.epub: perfbook.epub utilities/epub-endnotes.sh utilities/epub-endnotes.pl
+	sh utilities/epub-endnotes.sh perfbook.epub $@
 
 cleanfigs-epub:
 	rm -rf epub-figs
@@ -743,7 +748,7 @@ ls-unused:
 
 neatfreak: distclean
 	find . -name '*.pdf' | xargs rm -f
-	rm -f perfbook.epub
+	rm -f perfbook.epub perfbook-endnotes.epub
 
 cleanfigs-eps:
 	rm -f $(EPSSOURCES_FROM_TEX) $(EPSSOURCES_FROM_DOT) $(EPSSOURCES_FROM_FIG)

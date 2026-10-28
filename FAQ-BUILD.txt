@@ -389,7 +389,27 @@
 		Intermediates go to epub-tmp/, epub-figs/, perfbook-epub-images/,
 		and perfbook-epub_html.*.  "make epub-clean" (or "make html-clean",
 		also run by "make clean") removes them; "make neatfreak" also
-		removes "perfbook.epub".
+		removes "perfbook.epub" and "perfbook-endnotes.epub".
+
+		Footnotes and Quick Quiz answers are EPUB 3 popup footnotes
+		(epub:type="noteref"/"footnote").  Readers without popup
+		support, or that typeset footnotes at the bottom of the page,
+		can use "make epub-endnotes" instead.  It builds
+		"perfbook-endnotes.epub", where footnotes are plain linked
+		notes at the end of each chapter and Quick Quiz answers are
+		ordinary text in the answers appendix, as in the PDF.
+
+		KOReader shows the popup footnotes when "Show footnotes in popup"
+		is on (Settings > Taps and gestures > Links).  Its default
+		"In-page EPUB footnotes" style tweak (Style tweaks > In-page
+		footnotes) puts footnote text at the bottom of the page instead;
+		turn it off and turn on "Hide non-linear fragments" (Navigation
+		menu) to keep the text out of the page flow.  Quick Quiz answers
+		are never placed in-page.
+
+		Foliate 3.3 (WebKitGTK 2.54) leaves blank space where a scroll
+		box continues on the next page, so listings and tables wrap
+		long lines rather than scroll horizontally.
 
 		Known limitations: page-number indexes are omitted (the acronym
 		list is kept), math is rendered as SVG images, and SVG cartoons

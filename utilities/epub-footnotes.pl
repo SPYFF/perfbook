@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 # Convert lwarp/pandoc footnote markup and Quick Quiz answers to native
-# EPUB 3.3 footnotes (epub:type="noteref"/"footnote" with backlinks).
+# EPUB 3 footnotes (epub:type="noteref"/"footnote" with backlinks).
 # Phase 1 converts plain numeric footnotes; Phase 2 converts Quick Quiz
-# [Answer] links and Appendix E answers. All counts are asserted before
-# writing any files.
+# [Answer] links and Appendix E answers, tagging the latter with class
+# "quiz-answer" so the stylesheet can keep them out of in-page footnote
+# areas. All counts are asserted before writing any files.
 
 use strict;
 use warnings;
@@ -76,7 +77,7 @@ $html{$answers_file} =~ s{
     die "$0: answer $n leaks a question marker\n" if $rest =~ m{id="QQA\.};
     my $nback = ($rest =~ s{(<a\ href="[^"]*\#QQE\.[^"]*")>}{$1 epub:type="backlink" role="doc-backlink">}g);
     die "$0: answer $n has $nback end-links (want 1)\n" unless $nback == 1;
-    qq{<aside id="QQA.$n" epub:type="footnote" role="doc-footnote"><p><strong>Answer:</strong>$rest</aside>};
+    qq{<aside class="quiz-answer" id="QQA.$n" epub:type="footnote" role="doc-footnote"><p><strong>Answer:</strong>$rest</aside>};
 }gexs;
 
 die "$0: paired $n_asides answers with " . scalar(@nums) . " questions\n" unless $n_asides == @nums;

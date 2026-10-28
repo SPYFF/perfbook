@@ -144,6 +144,17 @@ cat >> "$epub_css" << 'EOF' || exit 2
 figure.epigraph { margin: 1.5em 0 1.5em auto; max-width: 27em; font-size: .85em; text-align: left; }
 figure.epigraph p { margin: 0; padding: .25ex 0; text-indent: 0; }
 figure.epigraph figcaption { text-align: right; border-top: 1px solid #A0A0A0; font-variant: small-caps; font-size: .92em; margin-top: .5ex; }
+
+/* Listings and tables: no scroll boxes.  WebKit-based readers (Foliate)
+   paint only the first page of an overflow:auto box that is split across
+   pages, leaving blank space for the rest, so wrap long tokens instead. */
+pre, table { overflow: visible; }
+pre code, th, td { overflow-wrap: anywhere; }
+
+/* KOReader: never typeset Quick Quiz answers as in-page footnotes (they
+   would spoil the answer below the question); tap-to-popup still works
+   because detection uses the epub:type/role attributes. */
+aside.quiz-answer { -cr-hint: none !important; }
 EOF
 check_positive "epigraph preservation" "`grep -rho '<figure class="epigraph"' $tmp/*.html | wc -l`" "`grep -rho '<figure class="epigraph"' "$package"/EPUB/text/*.xhtml | wc -l`"
 
